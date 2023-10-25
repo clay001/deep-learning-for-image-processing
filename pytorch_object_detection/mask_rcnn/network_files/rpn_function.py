@@ -184,7 +184,8 @@ class AnchorsGenerator(nn.Module):
         # 计算特征层上的一步等于原始图像上的步长
         strides = [[torch.tensor(image_size[0] // g[0], dtype=torch.int64, device=device),
                     torch.tensor(image_size[1] // g[1], dtype=torch.int64, device=device)] for g in grid_sizes]
-
+        
+        import pdb;pdb.set_trace()
         # 根据提供的sizes和aspect_ratios生成anchors模板
         self.set_cell_anchors(dtype, device)
 
@@ -307,7 +308,6 @@ def concat_box_prediction_layers(box_cls, box_regression):
     box_cls = torch.cat(box_cls_flattened, dim=1).flatten(0, -2)  # start_dim, end_dim
     box_regression = torch.cat(box_regression_flattened, dim=1).reshape(-1, 4)
     return box_cls, box_regression
-
 
 class RegionProposalNetwork(torch.nn.Module):
     """
@@ -471,6 +471,7 @@ class RegionProposalNetwork(torch.nn.Module):
         """
         num_images = proposals.shape[0]
         device = proposals.device
+        import pdb;pdb.set_trace()
 
         # do not backprop throught objectness
         objectness = objectness.detach()
@@ -508,13 +509,13 @@ class RegionProposalNetwork(torch.nn.Module):
             boxes = box_ops.clip_boxes_to_image(boxes, img_shape)
 
             # 返回boxes满足宽，高都大于min_size的索引
-            keep = box_ops.remove_small_boxes(boxes, self.min_size)
-            boxes, scores, lvl = boxes[keep], scores[keep], lvl[keep]
+            # keep = box_ops.remove_small_boxes(boxes, self.min_size)
+            # boxes, scores, lvl = boxes[keep], scores[keep], lvl[keep]
 
             # 移除小概率boxes，参考下面这个链接
             # https://github.com/pytorch/vision/pull/3205
-            keep = torch.where(torch.ge(scores, self.score_thresh))[0]  # ge: >=
-            boxes, scores, lvl = boxes[keep], scores[keep], lvl[keep]
+            # keep = torch.where(torch.ge(scores, self.score_thresh))[0]  # ge: >=
+            # boxes, scores, lvl = boxes[keep], scores[keep], lvl[keep]
 
             # non-maximum suppression, independently done per level
             keep = box_ops.batched_nms(boxes, scores, lvl, self.nms_thresh)
@@ -601,43 +602,74 @@ class RegionProposalNetwork(torch.nn.Module):
         # objectness和pred_bbox_deltas都是list
         objectness, pred_bbox_deltas = self.head(features)
 
-        # 生成一个batch图像的所有anchors信息,list(tensor)元素个数等于batch_size
-        anchors = self.anchor_generator(images, features)
+        # cls_prob = torch.concat( (objectness[0], torch.zeros(objectness[0].shape)), 1)
+        # bbox_pred = pred_bbox_deltas[0]
+        
+        # im_info = torch.tensor([800,1088,2.13])
+        # scales = (32.0, 64.0, 128.0, 256.0, 512.0)
+        # ratios= ((0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0), (0.5, 1.0, 2.0))
+        # feature_stride = 1
+        # threshold = 0.7  
+        # rpn_pre_nms_top_n = 1000
+        # rpn_post_nms_top_n = 1000
+        # rpn_min_size = 1.0
+        # iou_loss = False 
+        # boxes = [torch.zeros((1000,4))]
+        import os
+        if(os.environ["Mode"] == "E"):
+            # 开始进入TVM算子
+            result = []
+            for cls_prob, bbox_pred in zip(objectness, pred_bbox_deltas):
+                cls_prob = torch.sigmoid(cls_prob)
+                cls_prob = torch.concat( (cls_prob, torch.zeros(cls_prob.shape)), 1)
+                cls_prob = cls_prob[:,[0,3,1,4,2,5],:,:]
+                
+                cls_prob= cls_prob[:,:,:10,:10].reshape(100, -1)
+                bbox_pred = bbox_pred[:,:,:10,:10].reshape(100, -1)
+                lvl = torch.concat( (cls_prob[:,:4], bbox_pred[:, :4]), 0)
+                result.append(lvl)
+            
+            out_tensor = torch.concat(result,0)
+            boxes = [out_tensor]
+        else:
+            # 生成一个batch图像的所有anchors信息,list(tensor)元素个数等于batch_size
+            anchors = self.anchor_generator(images, features)
 
-        # batch_size
-        num_images = len(anchors)
+            # batch_size
+            num_images = len(anchors)
 
-        # numel() Returns the total number of elements in the input tensor.
-        # 计算每个预测特征层上的对应的anchors数量
-        num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
-        num_anchors_per_level = [s[0] * s[1] * s[2] for s in num_anchors_per_level_shape_tensors]
+            # numel() Returns the total number of elements in the input tensor.
+            # 计算每个预测特征层上的对应的anchors数量
+            num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness]
+            num_anchors_per_level = [s[0] * s[1] * s[2] for s in num_anchors_per_level_shape_tensors]
+            
+            # 调整内部tensor格式以及shape
+            objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness,
+                                                                        pred_bbox_deltas)
+            # objectness[159882], pred_bbox_deltas[159882, 4]
+            
+            # apply pred_bbox_deltas to anchors to obtain the decoded proposals
+            # note that we detach the deltas because Faster R-CNN do not backprop through
+            # the proposals
+            # 将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
+            proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
+            proposals = proposals.view(num_images, -1, 4)
 
-        # 调整内部tensor格式以及shape
-        objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness,
-                                                                    pred_bbox_deltas)
-
-        # apply pred_bbox_deltas to anchors to obtain the decoded proposals
-        # note that we detach the deltas because Faster R-CNN do not backprop through
-        # the proposals
-        # 将预测的bbox regression参数应用到anchors上得到最终预测bbox坐标
-        proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
-        proposals = proposals.view(num_images, -1, 4)
-
-        # 筛除小boxes框，nms处理，根据预测概率获取前post_nms_top_n个目标
-        boxes, scores = self.filter_proposals(proposals, objectness, images.image_sizes, num_anchors_per_level)
+            # 筛除小boxes框，nms处理，根据预测概率获取前post_nms_top_n个目标
+            boxes, scores = self.filter_proposals(proposals, objectness, images.image_sizes, num_anchors_per_level)
 
         losses = {}
-        if self.training:
-            assert targets is not None
-            # 计算每个anchors最匹配的gt，并将anchors进行分类，前景，背景以及废弃的anchors
-            labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors, targets)
-            # 结合anchors以及对应的gt，计算regression参数
-            regression_targets = self.box_coder.encode(matched_gt_boxes, anchors)
-            loss_objectness, loss_rpn_box_reg = self.compute_loss(
-                objectness, pred_bbox_deltas, labels, regression_targets
-            )
-            losses = {
-                "loss_objectness": loss_objectness,
-                "loss_rpn_box_reg": loss_rpn_box_reg
-            }
+        # if self.training:
+        #     assert targets is not None
+        #     # 计算每个anchors最匹配的gt，并将anchors进行分类，前景，背景以及废弃的anchors
+        #     labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors, targets)
+        #     # 结合anchors以及对应的gt，计算regression参数
+        #     regression_targets = self.box_coder.encode(matched_gt_boxes, anchors)
+        #     loss_objectness, loss_rpn_box_reg = self.compute_loss(
+        #         objectness, pred_bbox_deltas, labels, regression_targets
+        #     )
+        #     losses = {
+        #         "loss_objectness": loss_objectness,
+        #         "loss_rpn_box_reg": loss_rpn_box_reg
+        #     }
         return boxes, losses

@@ -147,6 +147,7 @@ class MaskRCNN(FasterRCNN):
 
         if mask_roi_pool is None:
             mask_roi_pool = MultiScaleRoIAlign(featmap_names=["0", "1", "2", "3"], output_size=14, sampling_ratio=2)
+            # mask_roi_pool = MultiScaleRoIAlign(featmap_names=["0"], output_size=14, sampling_ratio=2)
 
         if mask_head is None:
             mask_layers = (256, 256, 256, 256)
@@ -208,7 +209,7 @@ class MaskRCNNHeads(nn.Sequential):
         """
         d = OrderedDict()
         next_feature = in_channels
-
+        
         for layer_idx, layers_features in enumerate(layers, 1):
             d[f"mask_fcn{layer_idx}"] = nn.Conv2d(next_feature,
                                                   layers_features,

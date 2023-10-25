@@ -133,9 +133,9 @@ def overwrite_eps(model, eps):
         if isinstance(module, FrozenBatchNorm2d):
             module.eps = eps
 
-
+from torchvision.ops import misc as misc_nn_ops
 def resnet50_fpn_backbone(pretrain_path="",
-                          norm_layer=nn.BatchNorm2d,
+                          norm_layer=nn.BatchNorm2d, #misc_nn_ops.FrozenBatchNorm2d
                           trainable_layers=3,
                           returned_layers=None,
                           extra_blocks=None):

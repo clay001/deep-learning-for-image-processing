@@ -403,16 +403,19 @@ class GeneralizedRCNNTransform(nn.Module):
             return result
 
         # 遍历每张图片的预测信息，将boxes信息还原回原尺度
-        for i, (pred, im_s, o_im_s) in enumerate(zip(result, image_shapes, original_image_sizes)):
-            boxes = pred["boxes"]
-            boxes = resize_boxes(boxes, im_s, o_im_s)  # 将bboxes缩放回原图像尺度上
-            result[i]["boxes"] = boxes
-            if "masks" in pred:
-                masks = pred["masks"]
-                # 将mask映射回原图尺度
-                masks = paste_masks_in_image(masks, boxes, o_im_s)
-                result[i]["masks"] = masks
-
+        # for i, (pred, im_s, o_im_s) in enumerate(zip(result, image_shapes, original_image_sizes)):
+        pred = result[0]
+        im_s = image_shapes[0]
+        o_im_s = original_image_sizes[0]
+        i = 0
+        boxes = pred["boxes"]
+        boxes = resize_boxes(boxes, im_s, o_im_s)  # 将bboxes缩放回原图像尺度上
+        result[i]["boxes"] = boxes
+        if "masks" in pred:
+            masks = pred["masks"]
+            # 将mask映射回原图尺度
+            masks = paste_masks_in_image(masks, boxes, o_im_s)
+            result[i]["masks"] = masks
         return result
 
     def __repr__(self):

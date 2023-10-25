@@ -7,10 +7,10 @@ from torchvision.ops.misc import FrozenBatchNorm2d
 import transforms
 from network_files import MaskRCNN
 from backbone import resnet50_fpn_backbone
-from my_dataset_coco import CocoDetection
-from my_dataset_voc import VOCInstances
+# from my_dataset_coco import CocoDetection
+# from my_dataset_voc import VOCInstances
 from train_utils import train_eval_utils as utils
-from train_utils import GroupedBatchSampler, create_aspect_ratio_groups
+# from train_utils import GroupedBatchSampler, create_aspect_ratio_groups
 
 
 def create_model(num_classes, load_pretrain_weights=True):
@@ -21,7 +21,6 @@ def create_model(num_classes, load_pretrain_weights=True):
     #                                  trainable_layers=3)
     # resnet50 imagenet weights url: https://download.pytorch.org/models/resnet50-0676ba61.pth
     backbone = resnet50_fpn_backbone(pretrain_path="resnet50.pth", trainable_layers=3)
-
     model = MaskRCNN(backbone, num_classes=num_classes)
 
     if load_pretrain_weights:
@@ -37,74 +36,79 @@ def create_model(num_classes, load_pretrain_weights=True):
 
 
 def main(args):
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(args.device if 0 else "cpu")
     print("Using {} device training.".format(device.type))
 
     # 用来保存coco_info的文件
-    now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    det_results_file = f"det_results{now}.txt"
-    seg_results_file = f"seg_results{now}.txt"
+    # now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    # det_results_file = f"det_results{now}.txt"
+    # seg_results_file = f"seg_results{now}.txt"
 
-    data_transform = {
-        "train": transforms.Compose([transforms.ToTensor(),
-                                     transforms.RandomHorizontalFlip(0.5)]),
-        "val": transforms.Compose([transforms.ToTensor()])
-    }
+    # data_transform = {
+    #     "train": transforms.Compose([transforms.ToTensor(),
+    #                                  transforms.RandomHorizontalFlip(0.5)]),
+    #     "val": transforms.Compose([transforms.ToTensor()])
+    # }
 
-    data_root = args.data_path
+    # data_root = args.data_path
 
-    # load train data set
-    # coco2017 -> annotations -> instances_train2017.json
-    train_dataset = CocoDetection(data_root, "train", data_transform["train"])
-    # VOCdevkit -> VOC2012 -> ImageSets -> Main -> train.txt
-    # train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
-    train_sampler = None
+    # # load train data set
+    # # coco2017 -> annotations -> instances_train2017.json
+    # train_dataset = CocoDetection(data_root, "train", data_transform["train"])
+    # # VOCdevkit -> VOC2012 -> ImageSets -> Main -> train.txt
+    # # train_dataset = VOCInstances(data_root, year="2012", txt_name="train.txt", transforms=data_transform["train"])
+    # train_sampler = None
 
-    # 是否按图片相似高宽比采样图片组成batch
-    # 使用的话能够减小训练时所需GPU显存，默认使用
-    if args.aspect_ratio_group_factor >= 0:
-        train_sampler = torch.utils.data.RandomSampler(train_dataset)
-        # 统计所有图像高宽比例在bins区间中的位置索引
-        group_ids = create_aspect_ratio_groups(train_dataset, k=args.aspect_ratio_group_factor)
-        # 每个batch图片从同一高宽比例区间中取
-        train_batch_sampler = GroupedBatchSampler(train_sampler, group_ids, args.batch_size)
+    # # 是否按图片相似高宽比采样图片组成batch
+    # # 使用的话能够减小训练时所需GPU显存，默认使用
+    # if args.aspect_ratio_group_factor >= 0:
+    #     train_sampler = torch.utils.data.RandomSampler(train_dataset)
+    #     # 统计所有图像高宽比例在bins区间中的位置索引
+    #     group_ids = create_aspect_ratio_groups(train_dataset, k=args.aspect_ratio_group_factor)
+    #     # 每个batch图片从同一高宽比例区间中取
+    #     train_batch_sampler = GroupedBatchSampler(train_sampler, group_ids, args.batch_size)
 
-    # 注意这里的collate_fn是自定义的，因为读取的数据包括image和targets，不能直接使用默认的方法合成batch
-    batch_size = args.batch_size
-    nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
-    print('Using %g dataloader workers' % nw)
+    # # 注意这里的collate_fn是自定义的，因为读取的数据包括image和targets，不能直接使用默认的方法合成batch
+    # batch_size = args.batch_size
+    # nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
+    # print('Using %g dataloader workers' % nw)
 
-    if train_sampler:
-        # 如果按照图片高宽比采样图片，dataloader中需要使用batch_sampler
-        train_data_loader = torch.utils.data.DataLoader(train_dataset,
-                                                        batch_sampler=train_batch_sampler,
-                                                        pin_memory=True,
-                                                        num_workers=nw,
-                                                        collate_fn=train_dataset.collate_fn)
-    else:
-        train_data_loader = torch.utils.data.DataLoader(train_dataset,
-                                                        batch_size=batch_size,
-                                                        shuffle=True,
-                                                        pin_memory=True,
-                                                        num_workers=nw,
-                                                        collate_fn=train_dataset.collate_fn)
+    # if train_sampler:
+    #     # 如果按照图片高宽比采样图片，dataloader中需要使用batch_sampler
+    #     train_data_loader = torch.utils.data.DataLoader(train_dataset,
+    #                                                     batch_sampler=train_batch_sampler,
+    #                                                     pin_memory=True,
+    #                                                     num_workers=nw,
+    #                                                     collate_fn=train_dataset.collate_fn)
+    # else:
+    #     train_data_loader = torch.utils.data.DataLoader(train_dataset,
+    #                                                     batch_size=batch_size,
+    #                                                     shuffle=True,
+    #                                                     pin_memory=True,
+    #                                                     num_workers=nw,
+    #                                                     collate_fn=train_dataset.collate_fn)
 
-    # load validation data set
-    # coco2017 -> annotations -> instances_val2017.json
-    val_dataset = CocoDetection(data_root, "val", data_transform["val"])
-    # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
-    # val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
-    val_data_loader = torch.utils.data.DataLoader(val_dataset,
-                                                  batch_size=1,
-                                                  shuffle=False,
-                                                  pin_memory=True,
-                                                  num_workers=nw,
-                                                  collate_fn=train_dataset.collate_fn)
+    # # load validation data set
+    # # coco2017 -> annotations -> instances_val2017.json
+    # val_dataset = CocoDetection(data_root, "val", data_transform["val"])
+    # # VOCdevkit -> VOC2012 -> ImageSets -> Main -> val.txt
+    # # val_dataset = VOCInstances(data_root, year="2012", txt_name="val.txt", transforms=data_transform["val"])
+    # val_data_loader = torch.utils.data.DataLoader(val_dataset,
+    #                                               batch_size=1,
+    #                                               shuffle=False,
+    #                                               pin_memory=True,
+    #                                               num_workers=nw,
+    #                                               collate_fn=train_dataset.collate_fn)
 
     # create model num_classes equal background + classes
     model = create_model(num_classes=args.num_classes + 1, load_pretrain_weights=args.pretrain)
+    model = model.eval()
+    import pdb; pdb.set_trace()
     model.to(device)
-
+    x = torch.randn(1, 3, 320, 320)
+    # out = model(x)
+    torch.onnx.export(model, x, "model.onnx", opset_version = 11)
+    import pdb; pdb.set_trace()
     train_loss = []
     learning_rate = []
     val_map = []

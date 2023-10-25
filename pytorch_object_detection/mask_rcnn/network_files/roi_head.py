@@ -432,21 +432,23 @@ class RoIHeads(torch.nn.Module):
             # 移除低概率目标，self.scores_thresh=0.05
             # gt: Computes input > other element-wise.
             # inds = torch.nonzero(torch.gt(scores, self.score_thresh)).squeeze(1)
-            inds = torch.where(torch.gt(scores, self.score_thresh))[0]
-            boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
+            # inds = torch.where(torch.gt(scores, self.score_thresh))[0]
+            # boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
 
             # remove empty boxes
             # 移除小目标
-            keep = box_ops.remove_small_boxes(boxes, min_size=1.)
-            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+            # keep = box_ops.remove_small_boxes(boxes, min_size=1.)
+            # boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
             # non-maximun suppression, independently done per class
             # 执行nms处理，执行后的结果会按照scores从大到小进行排序返回
             keep = box_ops.batched_nms(boxes, scores, labels, self.nms_thresh)
 
+            import pdb;pdb.set_trace()
             # keep only topk scoring predictions
             # 获取scores排在前topk个预测目标
             keep = keep[:self.detection_per_img]
+            keep.reshape((100,))
             boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
             all_boxes.append(boxes)
@@ -498,48 +500,49 @@ class RoIHeads(torch.nn.Module):
 
         result: List[Dict[str, torch.Tensor]] = []
         losses = {}
-        if self.training:
-            assert labels is not None and regression_targets is not None
-            loss_classifier, loss_box_reg = fastrcnn_loss(
-                class_logits, box_regression, labels, regression_targets)
-            losses = {
-                "loss_classifier": loss_classifier,
-                "loss_box_reg": loss_box_reg
-            }
-        else:
-            boxes, scores, labels = self.postprocess_detections(class_logits, box_regression, proposals, image_shapes)
-            num_images = len(boxes)
-            for i in range(num_images):
-                result.append(
-                    {
-                        "boxes": boxes[i],
-                        "labels": labels[i],
-                        "scores": scores[i],
-                    }
-                )
+        # if self.training:
+        #     assert labels is not None and regression_targets is not None
+        #     loss_classifier, loss_box_reg = fastrcnn_loss(
+        #         class_logits, box_regression, labels, regression_targets)
+        #     losses = {
+        #         "loss_classifier": loss_classifier,
+        #         "loss_box_reg": loss_box_reg
+        #     }
+        # else:
+        boxes, scores, labels = self.postprocess_detections(class_logits, box_regression, proposals, image_shapes)
+        num_images = len(boxes)
+        for i in range(num_images):
+            result.append(
+                {
+                    "boxes": boxes[i],
+                    "labels": labels[i],
+                    "scores": scores[i],
+                }
+            )
 
         if self.has_mask():
             mask_proposals = [p["boxes"] for p in result]  # 将最终预测的Boxes信息取出
-            if self.training:
-                # matched_idxs为每个proposal在正负样本匹配过程中得到的gt索引(背景的gt索引也默认设置成了0)
-                if matched_idxs is None:
-                    raise ValueError("if in training, matched_idxs should not be None")
+            # if self.training:
+            #     # matched_idxs为每个proposal在正负样本匹配过程中得到的gt索引(背景的gt索引也默认设置成了0)
+            #     if matched_idxs is None:
+            #         raise ValueError("if in training, matched_idxs should not be None")
 
-                # during training, only focus on positive boxes
-                num_images = len(proposals)
-                mask_proposals = []
-                pos_matched_idxs = []
-                for img_id in range(num_images):
-                    pos = torch.where(labels[img_id] > 0)[0]  # 寻找对应gt类别大于0，即正样本
-                    mask_proposals.append(proposals[img_id][pos])
-                    pos_matched_idxs.append(matched_idxs[img_id][pos])
-            else:
-                pos_matched_idxs = None
+            #     # during training, only focus on positive boxes
+            #     num_images = len(proposals)
+            #     mask_proposals = []
+            #     pos_matched_idxs = []
+            #     for img_id in range(num_images):
+            #         pos = torch.where(labels[img_id] > 0)[0]  # 寻找对应gt类别大于0，即正样本
+            #         mask_proposals.append(proposals[img_id][pos])
+            #         pos_matched_idxs.append(matched_idxs[img_id][pos])
+            # else:
+            pos_matched_idxs = None
 
             mask_features = self.mask_roi_pool(features, mask_proposals, image_shapes)
             mask_features = self.mask_head(mask_features)
             mask_logits = self.mask_predictor(mask_features)
 
+            result[0]["logits"] = mask_logits
             loss_mask = {}
             if self.training:
                 if targets is None or pos_matched_idxs is None or mask_logits is None:
@@ -551,9 +554,24 @@ class RoIHeads(torch.nn.Module):
                 loss_mask = {"loss_mask": rcnn_loss_mask}
             else:
                 labels = [r["labels"] for r in result]
-                mask_probs = maskrcnn_inference(mask_logits, labels)
-                for mask_prob, r in zip(mask_probs, result):
-                    r["masks"] = mask_prob
+                import os
+                if(os.environ["Mode"] == "NNA"):
+                    import numpy as np
+                    roc_boxes = torch.from_numpy( np.fromfile("tvm_infer_0_out_0.bin", dtype=np.float32).reshape((100,4)) )
+                    roc_labels = torch.from_numpy(np.fromfile("tvm_infer_0_out_1.bin", dtype=np.int64).reshape((100)))
+                    roc_scores = torch.from_numpy( np.fromfile("tvm_infer_0_out_2.bin", dtype=np.float32).reshape((100)) )
+                    roc_logits = torch.from_numpy( np.fromfile("tvm_infer_0_out_3.bin", dtype=np.float32).reshape((100,91,28,28)) )
+                    import pdb;pdb.set_trace()
+                    result[0]["boxes"] = roc_boxes
+                    result[0]["scores"] = roc_scores
+                    result[0]["labels"] = roc_labels
+                    mask_probs = maskrcnn_inference(roc_logits, [roc_labels])
+                if(os.environ["Mode"] == "E"):
+                    pass
+                else:
+                    mask_probs = maskrcnn_inference(mask_logits, labels)
+                    for mask_prob, r in zip(mask_probs, result):
+                        r["masks"] = mask_prob
 
             losses.update(loss_mask)
 

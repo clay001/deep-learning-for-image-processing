@@ -88,11 +88,19 @@ class FasterRCNNBase(nn.Module):
         # 将特征层以及标注target信息传入rpn中
         # proposals: List[Tensor], Tensor_shape: [num_proposals, 4],
         # 每个proposals是绝对坐标，且为(x1, y1, x2, y2)格式
-        proposals, proposal_losses = self.rpn(images, features, targets)
+        import os
+        if(os.environ["Mode"] == "NNA"):
+            import numpy as np
+            data = np.load("/home/lockewang/Models/1053_concate.npy")
+            proposals, proposal_losses = [torch.Tensor(data)], {}
+        else:
+            proposals, proposal_losses = self.rpn(images, features, targets)
 
         # 将rpn生成的数据以及标注target信息传入fast rcnn后半部分
         detections, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
-
+        
+        if(os.environ["Mode"] == "E"):
+            return detections
         # 对网络的预测结果进行后处理（主要将bboxes还原到原图像尺度上）
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
 
@@ -315,6 +323,7 @@ class FasterRCNN(FasterRCNNBase):
         if box_roi_pool is None:
             box_roi_pool = MultiScaleRoIAlign(
                 featmap_names=['0', '1', '2', '3'],  # 在哪些特征层进行roi pooling
+                # featmap_names=['0'],
                 output_size=[7, 7],
                 sampling_ratio=2)
 
